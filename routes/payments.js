@@ -55,6 +55,11 @@ router.post('/checkout-session', rateLimit('checkout-session', 15, 10 * 60 * 100
     });
 
     await db.query('UPDATE orders SET stripe_session_id = ?, payment_method = ? WHERE id = ?', [session.id, 'card', order.id]);
+    // Audit trail — session id only, never card data
+    await db.query(
+      'INSERT INTO payment_events (order_id, event, method, amount_ec, detail) VALUES (?, ?, ?, ?, ?)',
+      [order.id, 'checkout_session_created', 'card', order.total_ec, session.id]
+    );
     res.json({ ok: true, url: session.url });
   } catch (err) {
     console.error('Stripe checkout session error:', err.message);
@@ -64,7 +69,7 @@ router.post('/checkout-session', rateLimit('checkout-session', 15, 10 * 60 * 100
 
 // POST /api/payments/webhook — Stripe calls this server-to-server when a payment
 // completes. The signature is verified so only genuine Stripe events are trusted;
-// this is the ONLY place an order is ever marked paid.
+// this is the ONLY place an order is ever marked paid for card payments.
 router.post('/webhook', async (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(503).send('Stripe not configured');
@@ -82,11 +87,18 @@ router.post('/webhook', async (req, res) => {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       if (session.payment_status === 'paid') {
-        await db.query(
-          `UPDATE orders SET payment_status = 'paid', status = IF(status = 'pending', 'confirmed', status), paid_at = NOW()
-           WHERE stripe_session_id = ?`,
-          [session.id]
-        );
+        const [[order]] = await db.query('SELECT id, total_ec FROM orders WHERE stripe_session_id = ?', [session.id]);
+        if (order) {
+          await db.query(
+            `UPDATE orders SET payment_status = 'paid', status = IF(status = 'pending', 'confirmed', status), paid_at = NOW()
+             WHERE id = ?`,
+            [order.id]
+          );
+          await db.query(
+            'INSERT INTO payment_events (order_id, event, method, amount_ec, detail) VALUES (?, ?, ?, ?, ?)',
+            [order.id, 'card_payment_succeeded', 'card', order.total_ec, String(session.payment_intent || session.id).slice(0, 255)]
+          );
+        }
       }
     }
     res.json({ received: true });

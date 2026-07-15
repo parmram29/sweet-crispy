@@ -91,14 +91,20 @@
         <button class="btn btn-outline btn-sm" data-action="go-to" data-page="about" style="margin-top:.5rem">Read More About Us</button>
       </div>
       <div class="story-art">
-        <svg viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="1.6">
-          <circle cx="100" cy="100" r="86" stroke-dasharray="4 6"/>
-          <path d="M100 30 L165 130 A72 72 0 0 1 35 130 Z"/>
-          <circle cx="80" cy="90" r="5" fill="currentColor" stroke="none"/>
-          <circle cx="118" cy="78" r="5" fill="currentColor" stroke="none"/>
-          <circle cx="100" cy="112" r="5" fill="currentColor" stroke="none"/>
-          <circle cx="130" cy="105" r="5" fill="currentColor" stroke="none"/>
-        </svg>
+        <!-- Drop a real photo at public/images/kitchen.jpg (e.g. the restaurant
+             interior) and it shows here automatically; until then the line-art
+             fallback below is displayed instead. Same pattern as the hero photo. -->
+        <img id="story-photo" src="/images/kitchen.jpg" alt="Inside Sweet & Crispy">
+        <div class="story-art-fallback">
+          <svg viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="1.6">
+            <circle cx="100" cy="100" r="86" stroke-dasharray="4 6"/>
+            <path d="M100 30 L165 130 A72 72 0 0 1 35 130 Z"/>
+            <circle cx="80" cy="90" r="5" fill="currentColor" stroke="none"/>
+            <circle cx="118" cy="78" r="5" fill="currentColor" stroke="none"/>
+            <circle cx="100" cy="112" r="5" fill="currentColor" stroke="none"/>
+            <circle cx="130" cy="105" r="5" fill="currentColor" stroke="none"/>
+          </svg>
+        </div>
       </div>
     </div>
 

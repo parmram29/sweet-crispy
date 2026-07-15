@@ -3,8 +3,21 @@
 A family-run pizzeria & kitchen site for Grenada. Node/Express + MySQL backend,
 vanilla ES-module frontend (no bundler, no framework — deliberately, for a
 small single-location business this keeps the whole stack readable and cheap
-to host). Stripe Checkout handles card payments; cash is settled on pickup
-and confirmed by staff.
+to host). Orders support pickup or delivery (with a required, length-capped
+delivery address). Stripe Checkout handles card payments; cash is settled on
+pickup/delivery and confirmed by staff. Every payment-related event lands in
+an append-only `payment_events` audit table — metadata only, never card data.
+
+## Homepage photos
+
+Two photo slots degrade gracefully to built-in illustrations until real
+photos exist. To use real photos, drop two JPGs in `public/images/`:
+
+- `public/images/hero-pizza.jpg` — the brand-card photo (a great pizza shot)
+- `public/images/kitchen.jpg` — the "Our Story" photo (e.g. the restaurant interior)
+
+No code changes needed; the site detects them automatically
+(`public/js/pages/home-page.js::bindPhotoFallback`).
 
 ## Project layout
 
@@ -66,6 +79,12 @@ npm install
 npm run dev                  # nodemon, or `npm start` for plain node
 ```
 
+`db/schema.sql` is idempotent — safe to run repeatedly. Menu seeds use
+`INSERT IGNORE` against a `UNIQUE KEY (name, category)`, so re-running never
+duplicates items. (If a database from an older schema version already has
+duplicates, drop and recreate it once:
+`mysql -u root -p -e "DROP DATABASE sweet_crispy;" && mysql -u root -p < db/schema.sql`.)
+
 The app runs and serves the full frontend even without Stripe configured —
 card payment attempts return a clear "not configured yet, choose cash"
 message instead of failing silently (see `GET /api/payments/config`).
@@ -89,6 +108,15 @@ message instead of failing silently (see `GET /api/payments/config`).
   without having actually paid.
 - **Cash orders** are marked paid only by staff, via `PATCH /api/orders/:id/payment`,
   which refuses to touch a `card` order (that field is Stripe-webhook-only).
+- **No card data is ever collected or stored — by design, not just by policy.**
+  There is no input anywhere in this codebase that accepts a card number, and
+  no column anywhere that could hold one. The `payment_events` table is the
+  transaction log: order created, checkout session opened, webhook confirmed,
+  cash confirmed — amounts, methods, Stripe session/intent IDs, timestamps.
+  That is everything a reconciliation or dispute needs, with none of the PCI
+  DSS SAQ D liability that storing card data would create. If anyone ever
+  proposes "just save the card details in the database," the correct answer
+  is no — route them to this paragraph.
 - **Secrets** (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `ADMIN_PIN`, DB
   credentials) live only in `.env`, which is git-ignored. The frontend only
   ever learns `cardPaymentsEnabled: boolean` from `/api/payments/config` —

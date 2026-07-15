@@ -1,7 +1,10 @@
 -- ============================================================
 -- Sweet & Crispy — Database Schema
 -- Family-run pizzeria & kitchen, Grenada
--- Run once:  mysql -u root -p < db/schema.sql
+--
+-- Safe to run multiple times:  mysql -u root -p < db/schema.sql
+-- (menu seeds use INSERT IGNORE against a UNIQUE key, so re-running
+--  never duplicates items — see uq_menu_item below.)
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS sweet_crispy
@@ -14,6 +17,7 @@ USE sweet_crispy;
 -- category: 'pizza' or 'food' — the two ordering tabs on the site.
 -- subcategory: display grouping within a tab (e.g. "Stuffed Crust", "Burgers").
 -- price_large_ec is only used by items that offer a Medium/Large size (stuffed crust pizzas).
+-- uq_menu_item makes the seed inserts idempotent (INSERT IGNORE re-runs are no-ops).
 CREATE TABLE IF NOT EXISTS menu_items (
   id             INT AUTO_INCREMENT PRIMARY KEY,
   name           VARCHAR(120)   NOT NULL,
@@ -25,7 +29,8 @@ CREATE TABLE IF NOT EXISTS menu_items (
   available      TINYINT(1)     NOT NULL DEFAULT 1,
   is_signature   TINYINT(1)     NOT NULL DEFAULT 0,
   sort_order     INT            NOT NULL DEFAULT 0,
-  created_at     TIMESTAMP      DEFAULT CURRENT_TIMESTAMP
+  created_at     TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_menu_item (name, category)
 );
 
 -- ── Today's specials (chef's feature, shown on the homepage) ──
@@ -42,11 +47,16 @@ CREATE TABLE IF NOT EXISTS specials (
 
 -- ── Orders ────────────────────────────────────────────────────
 -- Prices are ALWAYS resolved server-side from menu_items — never trust a client-supplied price.
+-- order_type 'delivery' requires delivery_address (enforced in routes/orders.js).
+-- NO CARD DATA IS EVER STORED HERE OR ANYWHERE — card entry happens exclusively
+-- on Stripe's hosted checkout page (PCI DSS SAQ A). See payment_events for the audit trail.
 CREATE TABLE IF NOT EXISTS orders (
   id               INT AUTO_INCREMENT PRIMARY KEY,
   order_ref        VARCHAR(24)   NOT NULL UNIQUE,
   customer_name    VARCHAR(100)  NOT NULL,
   phone            VARCHAR(30)   NOT NULL,
+  order_type       ENUM('pickup','delivery') NOT NULL DEFAULT 'pickup',
+  delivery_address VARCHAR(255)  NULL,
   notes            TEXT,
   subtotal_ec      DECIMAL(8,2)  NOT NULL DEFAULT 0,
   total_ec         DECIMAL(8,2)  NOT NULL DEFAULT 0,
@@ -74,6 +84,23 @@ CREATE TABLE IF NOT EXISTS order_items (
   line_total           DECIMAL(8,2)  GENERATED ALWAYS AS (unit_price * quantity) STORED,
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
   FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE SET NULL
+);
+
+-- ── Payment audit log ─────────────────────────────────────────
+-- Append-only trail of every payment-related event: order created, Stripe
+-- checkout session opened, card payment confirmed by webhook, cash confirmed
+-- by staff. Holds transaction METADATA only — never card numbers, never CVVs,
+-- never expiry dates. Storing those would move the business from PCI DSS
+-- SAQ A into SAQ D scope and is deliberately impossible with this design.
+CREATE TABLE IF NOT EXISTS payment_events (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  order_id    INT           NOT NULL,
+  event       VARCHAR(40)   NOT NULL,
+  method      ENUM('card','cash') NULL,
+  amount_ec   DECIMAL(8,2)  NULL,
+  detail      VARCHAR(255)  NULL,
+  created_at  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 );
 
 -- ── Reservations ─────────────────────────────────────────────
@@ -130,10 +157,12 @@ ORDER BY total_sold DESC;
 
 -- ============================================================
 -- Seed: full Sweet & Crispy menu (56 items)
+-- INSERT IGNORE + uq_menu_item(name, category) = re-running this file
+-- never creates duplicates.
 -- ============================================================
 
 -- Pizza — Italian Pizza Menu (12")
-INSERT INTO menu_items (name, category, subcategory, description, price_ec, is_signature, sort_order) VALUES
+INSERT IGNORE INTO menu_items (name, category, subcategory, description, price_ec, is_signature, sort_order) VALUES
 ('Ortoland (Veggie)',        'pizza', 'Italian Pizza', 'Napoletana sauce, mozzarella, eggplant, fresh tomato, onion, artichoke, basil', 45.00, 0, 1),
 ('Spicy Elegant Chicken',    'pizza', 'Italian Pizza', 'Napoletana sauce, mozzarella, spicy chicken, mozzarella sticks', 45.00, 0, 2),
 ('Margherita',                'pizza', 'Italian Pizza', 'Napoletana sauce, fresh mozzarella, basil', 40.00, 1, 3),
@@ -150,7 +179,7 @@ INSERT INTO menu_items (name, category, subcategory, description, price_ec, is_s
 ('Polpette di Manzo',         'pizza', 'Italian Pizza', 'Napoletana sauce, mozzarella, beef meatball, onion, basil', 45.00, 0, 14);
 
 -- Pizza — Stuffed Crust Menu (Medium / Large)
-INSERT INTO menu_items (name, category, subcategory, description, price_ec, price_large_ec, is_signature, sort_order) VALUES
+INSERT IGNORE INTO menu_items (name, category, subcategory, description, price_ec, price_large_ec, is_signature, sort_order) VALUES
 ('Cheese',       'pizza', 'Stuffed Crust', 'Napoletana sauce, mozzarella', 40.00, 70.00, 0, 21),
 ('Hawaiian',      'pizza', 'Stuffed Crust', 'Napoletana sauce, mozzarella, turkey ham, pineapple', 45.00, 75.00, 0, 22),
 ('Rustica',       'pizza', 'Stuffed Crust', 'Napoletana sauce, mozzarella, sliced tomatoes, feta cheese', 45.00, 80.00, 0, 23),
@@ -164,7 +193,7 @@ INSERT INTO menu_items (name, category, subcategory, description, price_ec, pric
 ('Sefaha (Arabic)','pizza','Stuffed Crust', 'Special spicy sauce, mozzarella, ground beef with onions & spices', 35.00, 55.00, 0, 31);
 
 -- Food — Pasta
-INSERT INTO menu_items (name, category, subcategory, description, price_ec, is_signature, sort_order) VALUES
+INSERT IGNORE INTO menu_items (name, category, subcategory, description, price_ec, is_signature, sort_order) VALUES
 ('Pink Sauce (Cremosa)', 'food', 'Pasta', 'Creamy tomato sauce with broccoli — ask to add shrimp', 40.00, 0, 1),
 ('Red Sauce',            'food', 'Pasta', 'Tomato sauce, mozzarella, mushroom', 35.00, 0, 2),
 ('White Sauce (Alfredo)','food', 'Pasta', 'Alfredo sauce, mushroom, broccoli', 40.00, 0, 3),
