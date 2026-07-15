@@ -77,7 +77,7 @@ router.get('/', async (req, res) => {
 router.get('/track/:ref', async (req, res) => {
   try {
     const [rows] = await db.query(
-      'SELECT id, order_ref, status, payment_method, payment_status, subtotal_ec, total_ec, created_at FROM orders WHERE order_ref = ?',
+      'SELECT id, order_ref, status, order_type, payment_method, payment_status, subtotal_ec, total_ec, created_at FROM orders WHERE order_ref = ?',
       [req.params.ref]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Order not found' });
@@ -88,8 +88,9 @@ router.get('/track/:ref', async (req, res) => {
 
 // POST /api/orders — create a new order from a cart. Items are re-priced from the
 // database on every request. payment_method chooses the next step on the client:
-// 'cash' orders are confirmed immediately (pay at pickup); 'card' orders still need
-// a Stripe Checkout Session created via /api/payments/checkout-session.
+// 'cash' orders are confirmed immediately (pay at pickup/delivery); 'card' orders
+// still need a Stripe Checkout Session created via /api/payments/checkout-session.
+// order_type 'delivery' requires a delivery_address (length-capped free text).
 router.post('/', rateLimit('create-order', 15, 10 * 60 * 1000), async (req, res) => {
   const { customer_name, phone, notes, items, payment_method } = req.body;
   const name = (customer_name || '').trim();
@@ -97,6 +98,13 @@ router.post('/', rateLimit('create-order', 15, 10 * 60 * 1000), async (req, res)
   if (!name || name.length > 100) return res.status(400).json({ ok: false, error: 'Please enter your name' });
   if (!ph || ph.length > 30) return res.status(400).json({ ok: false, error: 'Please enter a phone number' });
   if (!['card', 'cash'].includes(payment_method)) return res.status(400).json({ ok: false, error: 'Choose a payment method' });
+
+  const order_type = req.body.order_type === 'delivery' ? 'delivery' : 'pickup';
+  let delivery_address = null;
+  if (order_type === 'delivery') {
+    delivery_address = (req.body.delivery_address || '').trim().slice(0, 255);
+    if (!delivery_address) return res.status(400).json({ ok: false, error: 'Please enter a delivery address' });
+  }
 
   const { error, resolved } = await resolveCart(items).catch(() => ({ error: 'Database error' }));
   if (error) return res.status(400).json({ ok: false, error });
@@ -107,9 +115,9 @@ router.post('/', rateLimit('create-order', 15, 10 * 60 * 1000), async (req, res)
     const total_ec = resolved.reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
     const order_ref = makeRef('ORD');
     const [orderResult] = await conn.query(
-      `INSERT INTO orders (order_ref, customer_name, phone, notes, subtotal_ec, total_ec, payment_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [order_ref, name, ph, (notes || '').slice(0, 500) || null, total_ec, total_ec, payment_method]
+      `INSERT INTO orders (order_ref, customer_name, phone, order_type, delivery_address, notes, subtotal_ec, total_ec, payment_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [order_ref, name, ph, order_type, delivery_address, (notes || '').slice(0, 500) || null, total_ec, total_ec, payment_method]
     );
     for (const item of resolved) {
       await conn.query(
@@ -117,6 +125,11 @@ router.post('/', rateLimit('create-order', 15, 10 * 60 * 1000), async (req, res)
         [orderResult.insertId, item.menu_item_id, item.item_name, item.size, item.unit_price, item.quantity, item.special_instructions]
       );
     }
+    // Audit trail — metadata only, never card data (see payment_events in db/schema.sql)
+    await conn.query(
+      'INSERT INTO payment_events (order_id, event, method, amount_ec, detail) VALUES (?, ?, ?, ?, ?)',
+      [orderResult.insertId, 'order_created', payment_method, total_ec, order_type]
+    );
     await conn.commit();
     const [newOrder] = await conn.query('SELECT * FROM orders WHERE id = ?', [orderResult.insertId]);
     const [newItems] = await conn.query('SELECT * FROM order_items WHERE order_id = ?', [orderResult.insertId]);
@@ -169,11 +182,17 @@ router.patch('/:id/payment', async (req, res) => {
   const { payment_status } = req.body;
   if (!['paid', 'unpaid'].includes(payment_status)) return res.status(400).json({ ok: false, error: 'Invalid payment status' });
   try {
-    const [[order]] = await db.query('SELECT payment_method FROM orders WHERE id = ?', [req.params.id]);
+    const [[order]] = await db.query('SELECT payment_method, total_ec FROM orders WHERE id = ?', [req.params.id]);
     if (!order) return res.status(404).json({ ok: false, error: 'Order not found' });
     if (order.payment_method !== 'cash') return res.status(400).json({ ok: false, error: 'Only cash orders can be marked paid here' });
     await db.query('UPDATE orders SET payment_status = ?, paid_at = ? WHERE id = ?',
       [payment_status, payment_status === 'paid' ? new Date() : null, req.params.id]);
+    if (payment_status === 'paid') {
+      await db.query(
+        'INSERT INTO payment_events (order_id, event, method, amount_ec, detail) VALUES (?, ?, ?, ?, ?)',
+        [req.params.id, 'cash_payment_confirmed', 'cash', order.total_ec, 'confirmed by staff']
+      );
+    }
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ ok: false, error: 'Database error' }); }
 });

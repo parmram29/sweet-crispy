@@ -115,6 +115,7 @@ export class AdminPage {
             <span class="badge b-${o.payment_status}">${o.payment_method || '—'} · ${o.payment_status}</span></div></div>
         </div>
         <div class="live-items">${(o.items || []).map(i => `${escapeHtml(i.item_name)}${i.size ? ' (' + escapeHtml(i.size) + ')' : ''} ×${i.quantity}${i.special_instructions ? ` <em>(${escapeHtml(i.special_instructions)})</em>` : ''}`).join(' · ') || '—'}</div>
+        ${o.order_type === 'delivery' ? `<div class="live-note">🛵 Delivery: ${escapeHtml(o.delivery_address || 'no address given')}</div>` : ''}
         ${o.notes ? `<div class="live-note">Note: ${escapeHtml(o.notes)}</div>` : ''}
         <div class="status-btns">
           ${o.status !== 'confirmed' ? `<button class="st-btn" data-action="set-order-status" data-id="${o.id}" data-status="confirmed">Confirm</button>` : ''}

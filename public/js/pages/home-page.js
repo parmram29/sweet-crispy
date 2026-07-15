@@ -15,13 +15,25 @@ export class HomePage {
       if (btn.dataset.action === 'go-to') this.router.goTo(btn.dataset.page);
     });
 
-    // Falls back to the hand-drawn illustration if no real photo has been
-    // placed at public/images/hero-pizza.jpg yet.
-    const photo = document.getElementById('hero-photo');
-    photo.addEventListener('error', () => {
-      photo.style.display = 'none';
-      photo.nextElementSibling.style.display = 'flex';
-    }, { once: true });
+    // Both homepage photo slots degrade to their illustration if no real
+    // photo exists yet: drop files at public/images/hero-pizza.jpg and
+    // public/images/kitchen.jpg and they appear automatically.
+    this.bindPhotoFallback('hero-photo');
+    this.bindPhotoFallback('story-photo');
+  }
+
+  bindPhotoFallback(imgId) {
+    const img = document.getElementById(imgId);
+    if (!img) return;
+    const showFallback = () => {
+      img.style.display = 'none';
+      const fallback = img.nextElementSibling;
+      if (fallback) fallback.style.display = 'flex';
+    };
+    // Module scripts are deferred, so the image may have already failed
+    // before this listener attaches — check for that case explicitly.
+    if (img.complete && img.naturalWidth === 0) showFallback();
+    else img.addEventListener('error', showFallback, { once: true });
   }
 
   async onEnter() {

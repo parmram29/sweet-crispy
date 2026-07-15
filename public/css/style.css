@@ -101,6 +101,8 @@ nav{background:var(--cream);border-bottom:1px solid var(--line);padding:0 1.5rem
 .story-grid p{color:var(--ink-soft);font-size:.98rem;line-height:1.8;margin-bottom:1rem;}
 .story-art{display:flex;align-items:center;justify-content:center;}
 .story-art svg{width:100%;max-width:280px;color:var(--terracotta);}
+.story-art img{width:100%;max-width:440px;aspect-ratio:4/3;object-fit:cover;border-radius:14px;box-shadow:0 16px 36px -18px rgba(43,36,32,.4);display:block;}
+.story-art-fallback{display:none;align-items:center;justify-content:center;width:100%;}
 
 /* SIGNATURE PICKS */
 .sig-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:1px;background:var(--line-soft);border:1px solid var(--line-soft);margin-bottom:1rem;}
@@ -213,6 +215,9 @@ footer .foot-line{font-size:.85rem;color:rgba(240,235,220,.85);margin-bottom:.5r
 .row{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;}
 .row.tight{gap:.4rem;}
 .row-btns{margin-top:1.2rem;display:flex;gap:.4rem;flex-wrap:wrap;}
+.panel-label{display:block;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);margin:.9rem 0 .35rem;font-weight:600;}
+.pay-note{font-size:.75rem;color:var(--terracotta);margin:-.3rem 0 .8rem;}
+.pay-note.subtle{color:var(--ink-dim);}
 .pay-method-row{display:flex;gap:.6rem;margin:.9rem 0;}
 .pm-btn{flex:1;background:var(--cream-2);border:1.5px solid transparent;border-radius:8px;padding:.7rem .5rem;text-align:center;cursor:pointer;font-size:.8rem;font-weight:600;color:var(--ink-soft);transition:all .15s;}
 .pm-btn.on{border-color:var(--terracotta);color:var(--terracotta);background:var(--terracotta-tint);}
