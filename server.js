@@ -63,4 +63,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  ✓  Local:   http://localhost:${PORT}`);
   console.log(`  ✓  Network: http://<your-ip>:${PORT}`);
   console.log('');
+  // Warns loudly (but does not exit) if the database is missing tables or
+  // columns this version of the app needs — see lib/verify-schema.js.
+  require('./lib/verify-schema').verifySchema();
 });
