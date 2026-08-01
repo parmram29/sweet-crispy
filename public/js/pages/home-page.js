@@ -45,9 +45,14 @@ export class HomePage {
 
   renderSignaturePicks() {
     const picks = this.menuStore.signaturePicks(6);
-    document.getElementById('sig-grid').innerHTML = picks.map(i => `
+    // A slight, deterministic tilt per card (not random-on-every-render, which
+    // would jitter on re-render) — small imperfection reads as handmade rather
+    // than a stamped-out grid of identical tiles.
+    const tilts = [-2, 1.5, -1, 2, -1.5, 1];
+    document.getElementById('sig-grid').innerHTML = picks.map((i, idx) => `
       <div class="sig-card">
         <div class="tag">${i.category === 'pizza' ? '🍕 Pizza' : '🍽 Kitchen'}</div>
+        <span class="sig-sticker hand" style="transform:rotate(${tilts[idx % tilts.length]}deg)">family favourite</span>
         <h4>${escapeHtml(i.name)}</h4>
         <p>${escapeHtml(i.description || '')}</p>
         <div class="sig-price">${money(i.price_ec)}${i.price_large_ec ? ' – ' + money(i.price_large_ec) : ''}</div>
