@@ -1,4 +1,4 @@
-import { money } from '../services/format.js';
+import { money, escapeHtml } from '../services/format.js';
 import { waLink } from '../services/whatsapp.js';
 import { footerHtml } from '../ui/footer.js';
 
@@ -48,8 +48,8 @@ export class HomePage {
     document.getElementById('sig-grid').innerHTML = picks.map(i => `
       <div class="sig-card">
         <div class="tag">${i.category === 'pizza' ? '🍕 Pizza' : '🍽 Kitchen'}</div>
-        <h4>${i.name}</h4>
-        <p>${i.description || ''}</p>
+        <h4>${escapeHtml(i.name)}</h4>
+        <p>${escapeHtml(i.description || '')}</p>
         <div class="sig-price">${money(i.price_ec)}${i.price_large_ec ? ' – ' + money(i.price_large_ec) : ''}</div>
       </div>`).join('');
   }

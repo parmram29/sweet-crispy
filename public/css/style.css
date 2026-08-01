@@ -667,3 +667,14 @@ footer .foot-line[data-action]:hover{color:#fff;}
   *{animation-duration:.01ms!important;transition-duration:.01ms!important;}
   html{scroll-behavior:auto;}
 }
+
+/* ── Accessibility: elements that were click-handling <div>s are now real
+   <button>s (Ch.10 puts keyboard access at Tier 2, not style). These resets
+   keep the visual design identical while making them focusable, activatable
+   by Enter/Space, and announced correctly by screen readers. ───────────── */
+.pm-btn,.menu-sub-head,.date-tab,.slot-btn{
+  font:inherit;color:inherit;-webkit-appearance:none;appearance:none;width:100%;
+}
+.menu-sub-head{text-align:left;}
+.slot-btn:disabled{opacity:.35;cursor:not-allowed;text-decoration:line-through;}
+.slot-btn:disabled:hover{border-color:var(--line);color:var(--muted);}

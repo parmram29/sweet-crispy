@@ -140,10 +140,10 @@ export class OrderPage {
       ? Object.entries(groups).map(([sub, items]) => {
           const open = this.subcategory === sub || this.expandedSubcats.has(sub);
           return `
-          <div class="menu-sub-head${open ? ' open' : ''}" data-action="toggle-subcat" data-sub="${sub}">
-            <span>${sub}</span>
-            <span class="sub-meta">${items.length} item${items.length > 1 ? 's' : ''} <span class="chevron">▾</span></span>
-          </div>
+          <button type="button" class="menu-sub-head${open ? ' open' : ''}" data-action="toggle-subcat" data-sub="${escapeHtml(sub)}" aria-expanded="${open}">
+            <span>${escapeHtml(sub)}</span>
+            <span class="sub-meta">${items.length} item${items.length > 1 ? 's' : ''} <span class="chevron" aria-hidden="true">▾</span></span>
+          </button>
           ${open ? `<div class="subcat-body">${items.map(i => this.renderItemRow(i)).join('')}</div>` : ''}
         `;
         }).join('')
@@ -153,7 +153,7 @@ export class OrderPage {
       <div class="order-cats">${cats.map(c => `<button class="order-cat-btn${this.category === c.id ? ' on' : ''}" data-action="set-cat" data-cat="${c.id}">${c.label}</button>`).join('')}</div>
       <div class="subcat-chips">
         <button class="subcat-chip${!this.subcategory ? ' on' : ''}" data-action="set-subcat" data-sub="__all__">All</button>
-        ${subcats.map(s => `<button class="subcat-chip${this.subcategory === s ? ' on' : ''}" data-action="set-subcat" data-sub="${s}">${s}</button>`).join('')}
+        ${subcats.map(s => `<button class="subcat-chip${this.subcategory === s ? ' on' : ''}" data-action="set-subcat" data-sub="${escapeHtml(s)}" aria-pressed="${this.subcategory === s}">${escapeHtml(s)}</button>`).join('')}
       </div>
       <div class="order-layout">
         <div>${itemsHtml}</div>
@@ -170,8 +170,8 @@ export class OrderPage {
     return `
       <div class="item-row">
         <div class="item-info">
-          <h4>${i.name}${i.is_signature ? ' <span class="star">★</span>' : ''}</h4>
-          <p>${i.description || ''}</p>
+          <h4>${escapeHtml(i.name)}${i.is_signature ? ' <span class="star">★</span>' : ''}</h4>
+          <p>${escapeHtml(i.description || '')}</p>
           <div class="item-price">${priceLabel}</div>
         </div>
         <div class="item-actions">
@@ -209,7 +209,7 @@ export class OrderPage {
               <button data-action="change-qty" data-key="${c.key}" data-delta="-1">−</button>
               <span class="qn">${c.quantity}</span>
               <button data-action="change-qty" data-key="${c.key}" data-delta="1">+</button>
-              <button class="cl-remove" data-action="remove-line" data-key="${c.key}" title="Remove">×</button>
+              <button type="button" class="cl-remove" data-action="remove-line" data-key="${c.key}" title="Remove" aria-label="Remove ${escapeHtml(c.item_name)} from your order">×</button>
             </div>
           </div>
           ${this.noteEditorKey === c.key ? `
@@ -219,8 +219,8 @@ export class OrderPage {
 
       <label class="panel-label">Pickup or Delivery?</label>
       <div class="pay-method-row">
-        <div class="pm-btn${this.orderType === 'pickup' ? ' on' : ''}" data-action="set-order-type" data-type="pickup"><span class="pm-icon">🛍️</span>Pickup</div>
-        <div class="pm-btn${this.orderType === 'delivery' ? ' on' : ''}" data-action="set-order-type" data-type="delivery"><span class="pm-icon">🛵</span>Delivery</div>
+        <button type="button" class="pm-btn${this.orderType === 'pickup' ? ' on' : ''}" data-action="set-order-type" data-type="pickup" aria-pressed="${this.orderType === 'pickup'}"><span class="pm-icon" aria-hidden="true">🛍️</span>Pickup</button>
+        <button type="button" class="pm-btn${this.orderType === 'delivery' ? ' on' : ''}" data-action="set-order-type" data-type="delivery" aria-pressed="${this.orderType === 'delivery'}"><span class="pm-icon" aria-hidden="true">🛵</span>Delivery</button>
       </div>
 
       <div class="field"><label>Your Name</label><input id="ord-name" maxlength="100" placeholder="First &amp; last name" value="${escapeHtml(drafts.name)}"></div>
@@ -231,8 +231,8 @@ export class OrderPage {
 
       <label class="panel-label">Payment Method</label>
       <div class="pay-method-row">
-        <div class="pm-btn${this.payMethod === 'card' ? ' on' : ''}" data-action="set-pay-method" data-method="card"><span class="pm-icon">💳</span>Pay by Card</div>
-        <div class="pm-btn${this.payMethod === 'cash' ? ' on' : ''}" data-action="set-pay-method" data-method="cash"><span class="pm-icon">💵</span>Pay by Cash</div>
+        <button type="button" class="pm-btn${this.payMethod === 'card' ? ' on' : ''}" data-action="set-pay-method" data-method="card" aria-pressed="${this.payMethod === 'card'}"><span class="pm-icon" aria-hidden="true">💳</span>Pay by Card</button>
+        <button type="button" class="pm-btn${this.payMethod === 'cash' ? ' on' : ''}" data-action="set-pay-method" data-method="cash" aria-pressed="${this.payMethod === 'cash'}"><span class="pm-icon" aria-hidden="true">💵</span>Pay by Cash</button>
       </div>
       ${this.payMethod === 'card' && !this.menuStore.cardPaymentsEnabled ? '<div class="pay-note">Card payments are being set up — choose cash for now, or message us on WhatsApp.</div>' : ''}
       ${this.payMethod === 'card' && this.menuStore.cardPaymentsEnabled ? '<div class="pay-note subtle">You\'ll enter card details on Stripe\'s secure page — we never see or store your card number.</div>' : ''}

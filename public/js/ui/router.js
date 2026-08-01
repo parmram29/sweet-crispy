@@ -32,6 +32,8 @@ export class Router {
   goToPay(section) { this.goTo('pay', { section }); }
 
   toggleMobileNav() {
-    document.getElementById('nav-links').classList.toggle('open');
+    const open = document.getElementById('nav-links').classList.toggle('open');
+    // Keep the trigger's announced state in sync with what is on screen.
+    document.querySelector('[data-action="toggle-nav"]')?.setAttribute('aria-expanded', String(open));
   }
 }

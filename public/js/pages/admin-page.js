@@ -4,12 +4,12 @@ import { money, escapeHtml, fmt12 } from '../services/format.js';
  * Staff dashboard: auth gate, live orders, reservations, menu
  * visibility, today's special, and the sales report.
  *
- * Security note: the PIN gate here is a UX convenience, not the
- * access-control boundary — /api/auth/login is the actual check, and
- * it's a shared-PIN model appropriate for a small single-location team,
- * not a multi-user permission system. If staff accounts with individual
- * logins are ever needed, that check belongs server-side with
- * sessions/JWT, not just this client-side screen.
+ * Security note: this screen is presentation only. The real boundary is
+ * server-side — every staff endpoint is wrapped in requireStaff (lib/auth.js)
+ * and rejects requests without a valid session cookie, so hiding these panels
+ * is a convenience, not a control. It remains a shared-PIN model, which suits
+ * one small single-location team; individual staff accounts would mean per-user
+ * credentials and roles, not a change to this file.
  */
 export class AdminPage {
   constructor({ api, toast }) {
@@ -28,7 +28,7 @@ export class AdminPage {
     this.root.addEventListener('change', (e) => this.handleChange(e));
   }
 
-  onEnter() { /* admin has no auto-refresh on nav; login() populates everything */ }
+  onEnter() { this.restoreSession(); }
 
   handleKeydown(e) {
     if (e.target.id === 'pin-input' && e.key === 'Enter') this.login();
@@ -64,20 +64,54 @@ export class AdminPage {
   }
 
   // ── Auth ──────────────────────────────────────────────────────
+  // The dashboard is gated server-side: every staff endpoint requires the
+  // session cookie issued by /api/auth/login. Showing or hiding these panels
+  // is presentation only — it is not what protects the data.
   async login() {
     const pin = document.getElementById('pin-input').value;
     const res = await this.api.post('/api/auth/login', { pin });
-    if (!res.ok) { this.toast.show('Wrong PIN', 'err'); document.getElementById('pin-input').value = ''; return; }
+    document.getElementById('pin-input').value = '';
+    if (!res.ok) {
+      this.toast.show(res.error || 'Wrong PIN', 'err');
+      return;
+    }
+    this.showDashboard();
+  }
+
+  showDashboard() {
     document.getElementById('admin-gate').style.display = 'none';
     document.getElementById('admin-dash').style.display = 'block';
     document.getElementById('res-date-filter').value = new Date().toISOString().split('T')[0];
     this.renderLiveOrders(); this.loadReservations(); this.loadMenu(); this.loadSpecials(); this.renderSales();
   }
 
-  logout() {
+  /** Returns to the sign-in screen without claiming the server session ended. */
+  showGate() {
     document.getElementById('admin-gate').style.display = 'block';
     document.getElementById('admin-dash').style.display = 'none';
     document.getElementById('pin-input').value = '';
+  }
+
+  async logout() {
+    // Destroy the session server-side; clearing the screen alone would leave
+    // the cookie valid and the API open to whoever uses the machine next.
+    await this.api.post('/api/auth/logout');
+    this.showGate();
+    this.toast.show('Signed out', 'ok');
+  }
+
+  /** Called by ApiClient when any staff request comes back 401. */
+  handleSessionExpired() {
+    if (document.getElementById('admin-dash').style.display === 'block') {
+      this.showGate();
+      this.toast.show('Your session expired — please sign in again.', 'err');
+    }
+  }
+
+  /** Restores the dashboard after a page reload if the cookie is still valid. */
+  async restoreSession() {
+    const res = await this.api.get('/api/auth/session');
+    if (res.ok && res.authenticated) this.showDashboard();
   }
 
   switchTab(tab, btn) {
@@ -208,7 +242,7 @@ export class AdminPage {
     const list = this.menuItems.filter(i => i.category === this.menuCat);
     el.innerHTML = list.map(i => `
       <div class="menu-admin-item${i.available ? '' : ' off'}">
-        <div><div class="mai-name">${i.name}</div><div class="mai-meta">${i.subcategory} · ${money(i.price_ec)}${i.price_large_ec ? ' / ' + money(i.price_large_ec) : ''}</div></div>
+        <div><div class="mai-name">${escapeHtml(i.name)}</div><div class="mai-meta">${escapeHtml(i.subcategory)} · ${money(i.price_ec)}${i.price_large_ec ? ' / ' + money(i.price_large_ec) : ''}</div></div>
         <button class="btn ${i.available ? 'btn-outline' : 'btn-fill'} btn-sm" data-action="toggle-menu-item" data-id="${i.id}">${i.available ? 'Hide' : 'Show'}</button>
       </div>`).join('');
   }
@@ -249,7 +283,7 @@ export class AdminPage {
     const el = document.getElementById('admin-specials-list');
     if (!this.specials.length) { el.innerHTML = '<p style="color:var(--ink-dim);font-size:.82rem">No specials posted yet.</p>'; return; }
     el.innerHTML = `<p style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:.75rem">Active (${this.specials.length})</p>`
-      + this.specials.map(s => `<div class="sp-row"><div><div class="sp-row-name">${s.name}</div><div class="sp-row-meta">${money(s.price_ec)} · ${s.category || '—'}</div></div><button class="del-btn" data-action="remove-special" data-id="${s.id}">Remove</button></div>`).join('');
+      + this.specials.map(s => `<div class="sp-row"><div><div class="sp-row-name">${escapeHtml(s.name)}</div><div class="sp-row-meta">${money(s.price_ec)} · ${escapeHtml(s.category || '—')}</div></div><button class="del-btn" data-action="remove-special" data-id="${s.id}">Remove</button></div>`).join('');
   }
 
   // ── Sales report ──────────────────────────────────────────────
@@ -269,7 +303,7 @@ export class AdminPage {
     const items = topRes.ok ? topRes.items : [];
     const max = items[0]?.total_sold || 1;
     document.getElementById('top-chart').innerHTML = items.length
-      ? items.map(i => `<div class="bar-r"><div class="b-lbl">${i.item_name}</div><div class="b-track"><div class="b-fill" style="width:${(i.total_sold / max * 100).toFixed(0)}%"></div></div><div class="b-num">${i.total_sold}</div></div>`).join('')
+      ? items.map(i => `<div class="bar-r"><div class="b-lbl">${escapeHtml(i.item_name)}</div><div class="b-track"><div class="b-fill" style="width:${(i.total_sold / max * 100).toFixed(0)}%"></div></div><div class="b-num">${i.total_sold}</div></div>`).join('')
       : '<p style="color:var(--ink-dim);font-size:.82rem">No data yet.</p>';
     const orders = ordRes.ok ? ordRes.orders : [];
     document.getElementById('ord-tbody').innerHTML = orders.slice(0, 25).map(o => `<tr>
