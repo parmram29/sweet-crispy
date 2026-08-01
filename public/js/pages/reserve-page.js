@@ -43,9 +43,9 @@ export class ReservePage {
         <div>
           <div class="step-label">1 · Choose a Date</div>
           <div class="date-tabs">${days.map(d => `
-            <div class="date-tab${d.iso === this.state.date ? ' on' : ''}" data-action="pick-date" data-date="${d.iso}">
+            <button type="button" class="date-tab${d.iso === this.state.date ? ' on' : ''}" data-action="pick-date" data-date="${d.iso}" aria-pressed="${d.iso === this.state.date}">
               <span class="dt-day">${d.num}</span><span>${d.label}</span>
-            </div>`).join('')}</div>
+            </button>`).join('')}</div>
 
           <div class="step-label">2 · Party Size</div>
           <div style="margin-bottom:1.75rem">
@@ -86,11 +86,12 @@ export class ReservePage {
     if (!res.ok) { grid.innerHTML = '<div style="color:var(--ink-dim);font-size:.82rem;grid-column:1/-1">Could not load times.</div>'; return; }
     this.state.slots = res.slots;
     grid.innerHTML = res.slots.map(s => `
-      <div class="slot-btn${!s.available ? ' full' : ''}${this.state.time === s.time ? ' picked' : ''}"
-           data-action="pick-time" data-time="${s.time}" data-available="${s.available ? 1 : 0}">
+      <button type="button" class="slot-btn${!s.available ? ' full' : ''}${this.state.time === s.time ? ' picked' : ''}"
+           data-action="pick-time" data-time="${s.time}" data-available="${s.available ? 1 : 0}"
+           ${s.available ? '' : 'disabled'} aria-pressed="${this.state.time === s.time}">
         <span class="slot-time">${fmt12(s.time)}</span>
         <span class="slot-left${s.remaining <= 5 ? ' low' : ''}">${s.available ? (s.remaining <= 5 ? `${s.remaining} left` : 'Available') : 'Full'}</span>
-      </div>`).join('');
+      </button>`).join('');
   }
 
   pickDate(date) {

@@ -123,6 +123,35 @@ message instead of failing silently (see `GET /api/payments/config`).
   the secret key itself is constructed lazily server-side and never serialized
   to a response.
 
+## Staff authentication — the authorization boundary
+
+`POST /api/auth/login` exchanges the staff PIN for an opaque session token
+delivered as an `HttpOnly; SameSite=Strict` cookie; every staff-only route is
+wrapped in `requireStaff` (`lib/auth.js`) and returns 401 without it. Sessions
+live in memory with an 8-hour TTL, so a restart signs staff out — acceptable for
+a single-instance deployment, and the reason a multi-instance deployment must
+move this to a shared store.
+
+Also enforced here: constant-time PIN comparison, login rate limiting (8
+attempts / 15 min — a short PIN is otherwise brute-forceable in seconds),
+server-side session destruction on logout, and a boot-time refusal to start
+with a missing or placeholder `ADMIN_PIN`.
+
+**Public by design:** the menu, specials, availability slots, order creation,
+reservation creation, and `GET /api/orders/track/:ref` (the unguessable
+reference is the capability — it returns no phone, address, or internal id).
+**Everything else is staff-only.**
+
+## Running the tests
+
+```bash
+npm test        # node --test, no additional dependencies
+```
+
+Covers PIN verification (including fail-closed when unconfigured, and rejecting
+prefix matches), session lifecycle, the `requireStaff` middleware, rate-limiter
+windowing and per-client isolation, and pagination clamping.
+
 ## Other security decisions worth knowing about
 
 - **SQL injection**: every query uses `mysql2` parameterized placeholders
@@ -147,6 +176,23 @@ message instead of failing silently (see `GET /api/payments/config`).
   arbitrary JS. `frame-ancestors 'none'` blocks framing; no third-party
   script/font/connect origins are allowed beyond Google Fonts.
 - **Request size limits**: JSON/urlencoded bodies are capped at 100kb.
+- **Bounded collections**: `GET /api/orders` and `GET /api/reservations` are
+  paginated with a server-side ceiling (`parsePaging`), and return a
+  `{limit, offset, total}` envelope. A client cannot request the whole table.
+- **Indexes**: declared inline in `db/schema.sql` (MySQL has no
+  `CREATE INDEX IF NOT EXISTS`, and the schema must stay re-runnable). Without
+  `idx_orders_stripe_session` every Stripe webhook full-scans `orders`.
+- **Booking capacity** is enforced inside a transaction with `SELECT … FOR
+  UPDATE`. The previous read-then-insert could overbook a slot when two people
+  booked simultaneously.
+- **Accessibility is treated as correctness, not styling**: controls that were
+  click-handling `<div>`s (payment/pickup tiles, menu section headers, date and
+  time slots) are real `<button>`s with `aria-pressed` / `aria-expanded`, the
+  toast is an `aria-live` region, and full slots use the native `disabled`
+  state rather than looking disabled.
+- **`TRUST_PROXY`**: set it only when running behind a reverse proxy. Unset,
+  every client behind that proxy shares one rate-limit bucket; set when there
+  is no proxy, clients can spoof `X-Forwarded-For` to evade the limit.
 - **Admin PIN gate**: intentionally a shared-PIN model (`routes/auth.js`),
   appropriate for one small team sharing one dashboard — not a
   multi-user/role permission system. If individual staff logins are ever

@@ -66,7 +66,14 @@ CREATE TABLE IF NOT EXISTS orders (
   stripe_session_id VARCHAR(255) NULL,
   paid_at          TIMESTAMP     NULL,
   created_at       TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-  updated_at       TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at       TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  -- Declared inline rather than as separate CREATE INDEX statements so this
+  -- file stays safe to re-run (MySQL has no CREATE INDEX IF NOT EXISTS).
+  -- Without idx_orders_stripe_session every Stripe webhook full-scans this
+  -- table; the dashboard filters by status and sorts by created_at.
+  KEY idx_orders_stripe_session (stripe_session_id),
+  KEY idx_orders_status_created (status, created_at),
+  KEY idx_orders_created (created_at)
 );
 
 -- ── Order line items ──────────────────────────────────────────
@@ -114,7 +121,11 @@ CREATE TABLE IF NOT EXISTS reservations (
   res_time     VARCHAR(10)   NOT NULL,
   notes        TEXT,
   status       ENUM('confirmed','cancelled','seated','no-show') NOT NULL DEFAULT 'confirmed',
-  created_at   TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
+  created_at   TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  -- The booking page filters by date on every availability check, and the
+  -- capacity check runs per booking attempt.
+  KEY idx_res_date_time (res_date, res_time),
+  KEY idx_res_status (status)
 );
 
 -- ── Settings (owner-controlled values) ───────────────────────

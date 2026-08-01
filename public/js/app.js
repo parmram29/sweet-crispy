@@ -32,6 +32,8 @@ class App {
     this.reservePage = new ReservePage({ api, menuStore: this.menuStore, toast: this.toast });
     this.payPage = new PayPage({ orderPage: this.orderPage, reservePage: this.reservePage, menuStore: this.menuStore });
     this.adminPage = new AdminPage({ api, toast: this.toast });
+    // One central place to react to an expired or absent staff session.
+    api.onUnauthorized = () => this.adminPage.handleSessionExpired();
 
     this.router.onEnter('home', () => this.homePage.onEnter());
     this.router.onEnter('about', () => this.aboutPage.onEnter());
