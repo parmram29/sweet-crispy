@@ -1,35 +1,42 @@
 const router = require('express').Router();
-const { rateLimit } = require('../lib/security');
+const { rateLimit, clientKey } = require('../lib/security');
+const { securityEvent } = require('../lib/log');
 const {
-  createSession, destroySession, isValidSession, readCookie,
-  setSessionCookie, clearSessionCookie, verifyPin, COOKIE_NAME,
+  COOKIE_NAME, createSession, destroySession, isValidSession,
+  verifyPin, readCookie, setSessionCookie, clearSessionCookie,
 } = require('../lib/auth');
 
-/**
- * POST /api/auth/login — exchange the staff PIN for a session cookie.
- *
- * Rate limited to 8 attempts per 15 minutes per IP: the credential is a short
- * PIN, so without a limit the entire keyspace is brute-forceable in seconds.
- * The failure response is deliberately identical whether the PIN was missing
- * or wrong, so it cannot be used as an oracle.
- */
+// POST /api/auth/login — exchange the staff PIN for a session cookie.
+//
+// Rate limited because a short PIN is otherwise brute-forceable in seconds:
+// 10,000 combinations for 4 digits is minutes of scripted requests without
+// a limit. 8 attempts per 15 minutes per IP makes that impractical.
 router.post('/login', rateLimit('staff-login', 8, 15 * 60 * 1000), (req, res) => {
-  if (!verifyPin(req.body && req.body.pin)) {
+  const { pin } = req.body || {};
+  if (!pin) return res.status(400).json({ ok: false, error: 'PIN required' });
+
+  if (!verifyPin(pin)) {
+    // A09: without this a failed login left no trace anywhere, so someone
+    // could grind the PIN indefinitely and be invisible. Alert on this event.
+    securityEvent('auth_failed', { client: clientKey(req) });
     return res.status(401).json({ ok: false, error: 'Incorrect PIN' });
   }
+
   const token = createSession();
   setSessionCookie(res, token);
+  securityEvent('auth_success', { client: clientKey(req) });
   res.json({ ok: true });
 });
 
-/** POST /api/auth/logout — destroy the session server-side, not just client-side. */
+// POST /api/auth/logout — destroy the session server-side, not just client-side.
 router.post('/logout', (req, res) => {
   destroySession(readCookie(req, COOKIE_NAME));
   clearSessionCookie(res);
   res.json({ ok: true });
 });
 
-/** GET /api/auth/session — lets the dashboard restore state after a reload. */
+// GET /api/auth/session — lets the dashboard restore itself after a refresh
+// without re-prompting, and detect an expired session.
 router.get('/session', (req, res) => {
   res.json({ ok: true, authenticated: isValidSession(readCookie(req, COOKIE_NAME)) });
 });

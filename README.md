@@ -3,21 +3,9 @@
 A family-run pizzeria & kitchen site for Grenada. Node/Express + MySQL backend,
 vanilla ES-module frontend (no bundler, no framework — deliberately, for a
 small single-location business this keeps the whole stack readable and cheap
-to host). Orders support pickup or delivery (with a required, length-capped
-delivery address). Stripe Checkout handles card payments; cash is settled on
-pickup/delivery and confirmed by staff. Every payment-related event lands in
-an append-only `payment_events` audit table — metadata only, never card data.
-
-## Homepage photos
-
-Two photo slots degrade gracefully to built-in illustrations until real
-photos exist. To use real photos, drop two JPGs in `public/images/`:
-
-- `public/images/hero-pizza.jpg` — the brand-card photo (a great pizza shot)
-- `public/images/kitchen.jpg` — the "Our Story" photo (e.g. the restaurant interior)
-
-No code changes needed; the site detects them automatically
-(`public/js/pages/home-page.js::bindPhotoFallback`).
+to host). Card payments go through a Caribbean gateway (Republic Bank EPay
+or WiPay); cash is settled on pickup
+and confirmed by staff.
 
 ## Project layout
 
@@ -31,7 +19,7 @@ routes/
   auth.js                 Staff PIN check
   menu.js                  Public menu list + staff show/hide toggle
   orders.js                 Cart → order creation, editing, status, cash payment confirmation
-  payments.js                Stripe Checkout session creation + webhook handler
+  payments.js                Gateway-agnostic checkout + verified payment callback
   reservations.js              Table booking + time-slot capacity logic
   specials.js                   "Today's Special" homepage feature
   sales.js                       Revenue/report queries for the staff dashboard
@@ -73,55 +61,86 @@ in `server.js` possible (see below).
 ## Local setup
 
 ```bash
-cp .env.example .env        # fill in DB credentials, ADMIN_PIN, Stripe keys
+cp .env.example .env        # fill in DB credentials, ADMIN_PIN, gateway keys
 mysql -u root -p < db/schema.sql
 npm install
 npm run dev                  # nodemon, or `npm start` for plain node
 ```
 
-`db/schema.sql` is idempotent — safe to run repeatedly. Menu seeds use
-`INSERT IGNORE` against a `UNIQUE KEY (name, category)`, so re-running never
-duplicates items. (If a database from an older schema version already has
-duplicates, drop and recreate it once:
-`mysql -u root -p -e "DROP DATABASE sweet_crispy;" && mysql -u root -p < db/schema.sql`.)
-
-The app runs and serves the full frontend even without Stripe configured —
+The app runs and serves the full frontend even without a card gateway configured —
 card payment attempts return a clear "not configured yet, choose cash"
 message instead of failing silently (see `GET /api/payments/config`).
 
 ## Payments: how the security boundary actually works
 
-- **Card payments never touch this server.** `POST /api/payments/checkout-session`
-  creates a Stripe-hosted Checkout Session and returns its URL; the browser is
-  redirected there directly. Card numbers are entered on Stripe's page. This
-  keeps the app in PCI DSS **SAQ A** scope (the lightest self-assessment tier)
-  instead of SAQ D, because we never receive, transmit, or store cardholder data.
-- **Prices are never trusted from the client.** Every order line is re-priced
-  from `menu_items` in `routes/orders.js::resolveCart()` before it's persisted
-  or sent to Stripe. A tampered `fetch()` call claiming a $60 pizza costs $1
-  is simply ignored — the server looks up the real price by `menu_item_id`.
-- **Only the Stripe webhook marks a card order paid.** `routes/payments.js`
-  verifies the `Stripe-Signature` header against `STRIPE_WEBHOOK_SECRET`
-  before trusting an event — the success redirect the customer's browser
-  hits is purely cosmetic and never itself flips `payment_status`. This
-  closes the gap where someone could load the "payment successful" URL
-  without having actually paid.
-- **Cash orders** are marked paid only by staff, via `PATCH /api/orders/:id/payment`,
-  which refuses to touch a `card` order (that field is Stripe-webhook-only).
-- **No card data is ever collected or stored — by design, not just by policy.**
-  There is no input anywhere in this codebase that accepts a card number, and
-  no column anywhere that could hold one. The `payment_events` table is the
-  transaction log: order created, checkout session opened, webhook confirmed,
-  cash confirmed — amounts, methods, Stripe session/intent IDs, timestamps.
-  That is everything a reconciliation or dispute needs, with none of the PCI
-  DSS SAQ D liability that storing card data would create. If anyone ever
-  proposes "just save the card details in the database," the correct answer
-  is no — route them to this paragraph.
-- **Secrets** (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `ADMIN_PIN`, DB
-  credentials) live only in `.env`, which is git-ignored. The frontend only
-  ever learns `cardPaymentsEnabled: boolean` from `/api/payments/config` —
-  the secret key itself is constructed lazily server-side and never serialized
-  to a response.
+Card payments go through a **provider abstraction** (`lib/payments/`), so the
+gateway is a config choice rather than something baked through the codebase:
+
+```
+PAYMENT_PROVIDER=none    cash only (default) — the card option never appears
+PAYMENT_PROVIDER=epay    Republic Bank EPay  — lib/payments/epay.js
+PAYMENT_PROVIDER=wipay   WiPay               — lib/payments/wipay.js
+```
+
+Both gateway files are **skeletons**: the structure, security properties and
+audit logging are done, but every gateway-specific value (endpoint URLs, field
+names, signature scheme) is marked `TODO`. Those are deliberately not guessed —
+a plausible-looking guess yields code that runs, looks correct, and either fails
+to charge or marks orders paid without verifying anything. Until one is
+completed, `isConfigured()` returns false and the site quietly stays cash-only.
+
+**Card brands vs. gateway.** Accepting Visa and Mastercard is a property of your
+merchant account, not of this code. Whichever gateway is configured handles the
+brands your account supports; nothing here changes per brand.
+
+**Apple Pay / Google Pay** are wallet buttons that appear on the *gateway's*
+hosted payment page when your merchant account has them enabled. They are not
+implemented here and do not need to be — there is no code to write, only a
+setting to switch on with the gateway. Two caveats worth knowing:
+
+- Apple Pay requires **domain verification**: Apple issues a file that must be
+  served at `/.well-known/apple-developer-merchantid-domain-association` on your
+  real domain. `public/.well-known/` is already served as static content, so
+  dropping the file there is all that is needed.
+- Both require **HTTPS**. They will not appear over plain HTTP.
+
+**JWT** (`lib/jwt.js`) is available for gateways that authenticate API calls with
+a signed token rather than a static key — `provider.signJwt(claims, secret)`.
+It is dependency-free HS256 and fixes the algorithm rather than reading it from
+the token header, which is the standard JWT bypass (`alg:none`). Use it only if
+your gateway's docs call for it. Note that a JWT authenticates *our request to
+the gateway*; it is never evidence that a payment succeeded.
+
+**"Sign in with Apple/Google"** is a different thing again — customer accounts,
+not payments. This site deliberately has no customer accounts: an order needs a
+name and a phone number, nothing more, which is one less credential to breach.
+
+Whatever the gateway, these properties are enforced by the provider contract:
+
+- **Card details never touch this server.** A provider returns a URL on the
+  gateway's own hosted page and the browser is redirected there. Nothing in this
+  codebase accepts a card number, and no column exists that could store one.
+  That keeps the app in PCI DSS **SAQ A** scope instead of SAQ D.
+- **Prices are never trusted from the client.** Every line is re-priced from
+  `menu_items` in `routes/orders.js::resolveCart()` before it is persisted or
+  sent to the gateway. A tampered `fetch()` claiming a $60 pizza costs $1 is
+  ignored — the server looks up the real price by `menu_item_id`.
+- **Only a verified callback marks a card order paid.** The customer's browser
+  landing on the success URL is cosmetic; anyone can visit that URL without
+  paying. `verifyCallback()` must cryptographically verify the message came from
+  the gateway before it is trusted. If a gateway only redirects the browser back
+  with no signed server-to-server call, that redirect must be treated as a hint
+  and confirmed by querying the gateway's status API server-side.
+- **Orders are frozen once payment starts.** `PATCH /api/orders/:id/items` is
+  staff-only and refuses with 409 once `payment_ref` is set, closing the
+  "pay for a cheap basket, receive an expensive one" hole.
+- **Cash orders** are marked paid only by staff via `PATCH /api/orders/:id/payment`,
+  which refuses to touch a `card` order. `payment_method` cannot be changed after
+  creation, so a card order cannot be relabelled cash and then marked paid.
+- **Every payment event is logged** to the append-only `payment_events` table —
+  amounts, methods, gateway references, timestamps. Metadata only, never card data.
+- **Secrets** (gateway keys, `ADMIN_PIN`, DB credentials) live only in `.env`,
+  which is git-ignored. The frontend only ever learns `cardPaymentsEnabled: boolean`.
 
 ## Staff authentication — the authorization boundary
 
@@ -132,25 +151,14 @@ live in memory with an 8-hour TTL, so a restart signs staff out — acceptable f
 a single-instance deployment, and the reason a multi-instance deployment must
 move this to a shared store.
 
-Also enforced here: constant-time PIN comparison, login rate limiting (8
-attempts / 15 min — a short PIN is otherwise brute-forceable in seconds),
-server-side session destruction on logout, and a boot-time refusal to start
-with a missing or placeholder `ADMIN_PIN`.
+Also enforced here: constant-time PIN comparison, login rate limiting (8 attempts
+/ 15 min — a short PIN is otherwise brute-forceable in minutes), server-side
+session destruction on logout, and a boot-time refusal to start with a missing or
+placeholder `ADMIN_PIN`.
 
-**Public by design:** the menu, specials, availability slots, order creation,
-reservation creation, and `GET /api/orders/track/:ref` (the unguessable
-reference is the capability — it returns no phone, address, or internal id).
+**Public by design:** the menu, specials, order creation, and
+`GET /api/orders/track/:ref` (the unguessable reference is the capability).
 **Everything else is staff-only.**
-
-## Running the tests
-
-```bash
-npm test        # node --test, no additional dependencies
-```
-
-Covers PIN verification (including fail-closed when unconfigured, and rejecting
-prefix matches), session lifecycle, the `requireStaff` middleware, rate-limiter
-windowing and per-client isolation, and pagination clamping.
 
 ## Other security decisions worth knowing about
 
@@ -176,23 +184,6 @@ windowing and per-client isolation, and pagination clamping.
   arbitrary JS. `frame-ancestors 'none'` blocks framing; no third-party
   script/font/connect origins are allowed beyond Google Fonts.
 - **Request size limits**: JSON/urlencoded bodies are capped at 100kb.
-- **Bounded collections**: `GET /api/orders` and `GET /api/reservations` are
-  paginated with a server-side ceiling (`parsePaging`), and return a
-  `{limit, offset, total}` envelope. A client cannot request the whole table.
-- **Indexes**: declared inline in `db/schema.sql` (MySQL has no
-  `CREATE INDEX IF NOT EXISTS`, and the schema must stay re-runnable). Without
-  `idx_orders_stripe_session` every Stripe webhook full-scans `orders`.
-- **Booking capacity** is enforced inside a transaction with `SELECT … FOR
-  UPDATE`. The previous read-then-insert could overbook a slot when two people
-  booked simultaneously.
-- **Accessibility is treated as correctness, not styling**: controls that were
-  click-handling `<div>`s (payment/pickup tiles, menu section headers, date and
-  time slots) are real `<button>`s with `aria-pressed` / `aria-expanded`, the
-  toast is an `aria-live` region, and full slots use the native `disabled`
-  state rather than looking disabled.
-- **`TRUST_PROXY`**: set it only when running behind a reverse proxy. Unset,
-  every client behind that proxy shares one rate-limit bucket; set when there
-  is no proxy, clients can spoof `X-Forwarded-For` to evade the limit.
 - **Admin PIN gate**: intentionally a shared-PIN model (`routes/auth.js`),
   appropriate for one small team sharing one dashboard — not a
   multi-user/role permission system. If individual staff logins are ever
@@ -212,14 +203,16 @@ survive a menu item being deleted (`ON DELETE SET NULL`).
 ## Deploying
 
 1. Provision MySQL, run `db/schema.sql`.
-2. Set real environment variables (see `.env.example`) — especially
-   `STRIPE_SECRET_KEY`/`STRIPE_PUBLISHABLE_KEY`/`STRIPE_WEBHOOK_SECRET` from
-   your Stripe dashboard, and `CLIENT_URL` set to your real domain (used to
-   build the Stripe redirect URLs).
-3. In the Stripe dashboard, add a webhook endpoint at
-   `https://<your-domain>/api/payments/webhook` subscribed to
-   `checkout.session.completed`, and copy its signing secret into
-   `STRIPE_WEBHOOK_SECRET`.
-4. Serve over HTTPS (required for both Stripe and for `helmet`'s HSTS header
-   to mean anything) — terminate TLS at your load balancer/reverse proxy if
-   Node isn't handling it directly.
+2. Set real environment variables (see `.env.example`) — especially `ADMIN_PIN`
+   (the server refuses to start without a real one) and `CLIENT_URL` set to your
+   real domain, which is used to build the gateway redirect URLs.
+3. To take card payments, complete the provider file for your gateway
+   (`lib/payments/epay.js` or `lib/payments/wipay.js`) from their integration
+   docs, set `PAYMENT_PROVIDER` and the matching keys, flip that provider's
+   `IMPLEMENTED` flag, and test against their sandbox before going live.
+   Until then the site runs cash-only, which is a perfectly valid way to launch.
+4. Register your callback URL with the gateway as
+   `https://<your-domain>/api/payments/webhook`.
+5. Serve over HTTPS — required by any gateway, and for `helmet`'s HSTS header and
+   the `Secure` session cookie to mean anything. Terminate TLS at your load
+   balancer/reverse proxy if Node isn't handling it directly.
