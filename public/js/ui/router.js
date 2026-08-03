@@ -28,12 +28,12 @@ export class Router {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  /** Convenience for "go to the Pay page, already on the Order or Reserve tab." */
+  /** Convenience for "go to the Pay page" (kept as a named method since call
+      sites pass a payload — the payload itself is currently unused). */
   goToPay(section) { this.goTo('pay', { section }); }
 
   toggleMobileNav() {
     const open = document.getElementById('nav-links').classList.toggle('open');
-    // Keep the trigger's announced state in sync with what is on screen.
-    document.querySelector('[data-action="toggle-nav"]')?.setAttribute('aria-expanded', String(open));
+    document.querySelector('.hamburger').setAttribute('aria-expanded', String(open));
   }
 }

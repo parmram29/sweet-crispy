@@ -3,18 +3,12 @@ const express = require('express');
 const helmet  = require('helmet');
 const cors    = require('cors');
 const path    = require('path');
-const { log }  = require('./lib/log');
 const { assertAdminPinConfigured } = require('./lib/auth');
+const { getProvider } = require('./lib/payments');
+const { log } = require('./lib/log');
+const { verifySchema } = require('./lib/verify-schema');
 
 const app = express();
-
-// Only trust X-Forwarded-For when explicitly deployed behind a proxy. Trusting
-// it unconditionally would let any client spoof its source address and walk
-// around the rate limiters; never trusting it puts every customer behind a
-// proxy into one shared rate-limit bucket. Set TRUST_PROXY=1 when there is a
-// reverse proxy in front of this process.
-if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
-app.disable('x-powered-by');
 
 // Sets standard defensive headers (X-Content-Type-Options, X-Frame-Options,
 // Referrer-Policy, HSTS, etc).
@@ -45,17 +39,54 @@ app.use(helmet({
   },
 }));
 
-// The frontend is served from this same origin, so no cross-origin access is
-// required. `cors()` with no options reflected every origin, which is a wide
-// default for an API that now carries a staff session cookie. Set
-// CORS_ORIGIN only if a genuinely separate front end ever needs access.
+app.disable('x-powered-by');
+
+// Proxy trust must be explicit, because both defaults are wrong somewhere:
+//   unset behind nginx/Cloudflare → req.ip is the proxy for every request, so
+//     all customers share one rate-limit bucket and one abuser locks out the
+//     whole restaurant.
+//   set with no proxy in front    → X-Forwarded-For is attacker-controlled, so
+//     every rate limit is bypassed by rotating a header value.
+// Set TRUST_PROXY only when something really does sit in front of Node.
+if (process.env.TRUST_PROXY) {
+  // A number is the hop count; nginx on the same host is 1.
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isFinite(hops) ? hops : process.env.TRUST_PROXY);
+}
+
+// Force HTTPS in production. Cookies carry the staff session and orders carry
+// customer PII; both are readable on the wire over plain HTTP. Runs before
+// anything else so no handler ever sees an unencrypted request.
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    const proto = req.get('x-forwarded-proto') || req.protocol;
+    if (proto !== 'https') {
+      return res.redirect(308, `https://${req.get('host')}${req.originalUrl}`);
+    }
+    next();
+  });
+}
+
+// CORS is closed by default. It used to reflect any origin, which combined with
+// cookie auth would let any site call staff endpoints with the staff cookie
+// attached. Same-origin requests from this server's own frontend need no CORS
+// header at all; set CORS_ORIGIN only if a separate frontend host is added.
 app.use(cors(process.env.CORS_ORIGIN
-  ? { origin: process.env.CORS_ORIGIN.split(',').map(s => s.trim()), credentials: true }
+  ? { origin: process.env.CORS_ORIGIN, credentials: true }
   : { origin: false }));
 
-// The Stripe webhook needs the raw request body to verify its signature, so it
-// must be registered before the global express.json() parser.
-app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+// The payment callback's body parser depends on the active provider, and must
+// be registered before the global express.json(). Signature schemes that hash
+// the exact request bytes need the body unparsed; gateways that POST a form
+// need urlencoded. Getting this wrong makes every callback fail
+// verification, so it is driven off the provider rather than hard-coded.
+// Body limits are explicit everywhere: an unbounded parser is a trivial
+// memory-exhaustion DoS. A gateway callback is never larger than a few KB.
+const callbackFormat = getProvider().callbackBodyFormat;
+app.use('/api/payments/webhook',
+  callbackFormat === 'raw'  ? express.raw({ type: '*/*', limit: '64kb' })
+  : callbackFormat === 'form' ? express.urlencoded({ extended: false, limit: '64kb' })
+  : express.json({ limit: '64kb' }));
 
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
@@ -71,35 +102,52 @@ app.use('/api/reservations', require('./routes/reservations'));
 
 app.get('/api/ping', (req, res) => res.json({ ok: true, message: 'Sweet & Crispy server running' }));
 
-// Unknown /api/* paths must answer as an API, not as the SPA. Without this the
-// catch-all below returned index.html with a 200 for a mistyped endpoint, so a
-// client saw "success" and tried to parse HTML as JSON.
+// Unknown /api/* paths must return JSON 404, not the SPA's index.html — a
+// mistyped endpoint otherwise resolves as HTML and surfaces as a confusing
+// JSON parse error in the browser instead of a clear 404.
 app.use('/api', (req, res) => res.status(404).json({ ok: false, error: 'Not found' }));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Central error handler: nothing reaches the client but a generic message,
-// while the real error is logged in full. Must be registered last and must
-// take four arguments for Express to recognise it.
-// eslint-disable-next-line no-unused-vars
+// Central error handler — without this an async throw ends as a hung request.
+//
+// A10: the stack trace is logged server-side and never sent to the client.
+// Leaking file paths, library versions and query fragments to an attacker
+// hands them a map of the application for free.
 app.use((err, req, res, next) => {
-  log.error('unhandled_error', err, { method: req.method, path: req.path });
-  if (!res.headersSent) res.status(500).json({ ok: false, error: 'Something went wrong.' });
+  log.error('unhandled_error', {
+    message: err.message,
+    path: req.originalUrl,
+    method: req.method,
+  });
+  if (err.stack) console.error(err.stack);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ ok: false, error: 'Something went wrong' });
 });
 
-const PORT = process.env.PORT || 3000;
+// A crash mid-request leaves the process in an unknown state. Log loudly so
+// it is alertable rather than a silent restart nobody notices.
+process.on('unhandledRejection', (reason) => {
+  log.error('unhandled_rejection', { message: reason?.message || String(reason) });
+});
+process.on('uncaughtException', (err) => {
+  log.error('uncaught_exception', { message: err.message });
+  console.error(err.stack);
+  process.exit(1);
+});
 
-// Refuse to start with an unset or placeholder staff PIN — every order,
-// customer address and sales figure sits behind it.
+// Refuse to boot with an unset or placeholder ADMIN_PIN rather than run with a
+// dashboard "protected" by a value published in .env.example.
 if (!assertAdminPinConfigured()) process.exit(1);
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('  ✓  Sweet & Crispy server running');
   console.log(`  ✓  Local:   http://localhost:${PORT}`);
   console.log(`  ✓  Network: http://<your-ip>:${PORT}`);
   console.log('');
-  // Warns loudly (but does not exit) if the database is missing tables or
-  // columns this version of the app needs — see lib/verify-schema.js.
-  require('./lib/verify-schema').verifySchema();
+  // Catches "pulled new code, forgot to re-run db/schema.sql" at boot with one
+  // actionable message, instead of a 500 the first time someone orders.
+  verifySchema();
 });

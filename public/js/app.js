@@ -15,7 +15,6 @@ import { Router } from './ui/router.js';
 import { HomePage } from './pages/home-page.js';
 import { AboutPage } from './pages/about-page.js';
 import { OrderPage } from './pages/order-page.js';
-import { ReservePage } from './pages/reserve-page.js';
 import { PayPage } from './pages/pay-page.js';
 import { AdminPage } from './pages/admin-page.js';
 
@@ -29,11 +28,8 @@ class App {
     this.homePage = new HomePage({ menuStore: this.menuStore, router: this.router });
     this.aboutPage = new AboutPage({ menuStore: this.menuStore });
     this.orderPage = new OrderPage({ api, menuStore: this.menuStore, cart: this.cart, toast: this.toast });
-    this.reservePage = new ReservePage({ api, menuStore: this.menuStore, toast: this.toast });
-    this.payPage = new PayPage({ orderPage: this.orderPage, reservePage: this.reservePage, menuStore: this.menuStore });
+    this.payPage = new PayPage({ orderPage: this.orderPage, menuStore: this.menuStore });
     this.adminPage = new AdminPage({ api, toast: this.toast });
-    // One central place to react to an expired or absent staff session.
-    api.onUnauthorized = () => this.adminPage.handleSessionExpired();
 
     this.router.onEnter('home', () => this.homePage.onEnter());
     this.router.onEnter('about', () => this.aboutPage.onEnter());
