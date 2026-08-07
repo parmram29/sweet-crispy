@@ -6,7 +6,6 @@ const path    = require('path');
 const { assertAdminPinConfigured } = require('./lib/auth');
 const { getProvider } = require('./lib/payments');
 const { log } = require('./lib/log');
-const { verifySchema } = require('./lib/verify-schema');
 
 const app = express();
 
@@ -140,14 +139,19 @@ process.on('uncaughtException', (err) => {
 // dashboard "protected" by a value published in .env.example.
 if (!assertAdminPinConfigured()) process.exit(1);
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('');
-  console.log('  ✓  Sweet & Crispy server running');
-  console.log(`  ✓  Local:   http://localhost:${PORT}`);
-  console.log(`  ✓  Network: http://<your-ip>:${PORT}`);
-  console.log('');
-  // Catches "pulled new code, forgot to re-run db/schema.sql" at boot with one
-  // actionable message, instead of a 500 the first time someone orders.
-  verifySchema();
-});
+// Vercel's @vercel/node builder imports this file and calls the exported app
+// directly per-request — it never runs this file as a standalone process, so
+// app.listen() must only happen when server.js is actually executed with
+// `node server.js` (local dev, or a normal host like a VPS).
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log('');
+    console.log('  ✓  Sweet & Crispy server running');
+    console.log(`  ✓  Local:   http://localhost:${PORT}`);
+    console.log(`  ✓  Network: http://<your-ip>:${PORT}`);
+    console.log('');
+  });
+}
+
+module.exports = app;
