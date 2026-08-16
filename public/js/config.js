@@ -12,4 +12,4 @@ export const WHATSAPP_NUMBER = '14735369931';
 // (Extensions > Apps Script > Deploy > New deployment > Web app, "Anyone"
 // access). Leave blank to skip order logging entirely — the WhatsApp
 // message still works either way, this only adds the spreadsheet record.
-export const SHEET_WEBHOOK_URL = '';
+export const SHEET_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbzFfew4EFwu5um5j-YbVTGtCnHYRiRdy2LhILL2iemBrMAH0U3Hean3f-daX64ykTOK/exec';
