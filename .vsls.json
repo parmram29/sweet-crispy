@@ -1,0 +1,4 @@
+{
+    "hideFiles": true,
+    "excludeFiles": [".env", ".env.*"]
+  }
