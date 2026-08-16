@@ -36,23 +36,23 @@ describe('staff PIN verification', () => {
 });
 
 describe('session lifecycle', () => {
-  test('a created session validates, and a destroyed one does not', () => {
-    const token = auth.createSession();
+  test('a created session validates, and a destroyed one does not', async () => {
+    const token = await auth.createSession();
     assert.ok(token && token.length >= 32);
-    assert.equal(auth.isValidSession(token), true);
-    auth.destroySession(token);
-    assert.equal(auth.isValidSession(token), false);
+    assert.equal(await auth.isValidSession(token), true);
+    await auth.destroySession(token);
+    assert.equal(await auth.isValidSession(token), false);
   });
 
-  test('unknown, empty and null tokens are rejected', () => {
+  test('unknown, empty and null tokens are rejected', async () => {
     for (const bad of ['deadbeef', '', null, undefined]) {
-      assert.equal(auth.isValidSession(bad), false);
+      assert.equal(await auth.isValidSession(bad), false);
     }
   });
 
-  test('two sessions get distinct tokens', () => {
-    const a = auth.createSession();
-    const b = auth.createSession();
+  test('two sessions get distinct tokens', async () => {
+    const a = await auth.createSession();
+    const b = await auth.createSession();
     assert.notEqual(a, b);
   });
 });
@@ -67,27 +67,27 @@ describe('requireStaff middleware', () => {
     };
   }
 
-  test('rejects a request with no cookie', () => {
+  test('rejects a request with no cookie', async () => {
     const res = fakeRes();
     let nextCalled = false;
-    auth.requireStaff({ headers: {} }, res, () => { nextCalled = true; });
+    await auth.requireStaff({ headers: {} }, res, () => { nextCalled = true; });
     assert.equal(nextCalled, false, 'must not reach the handler');
     assert.equal(res.statusCode, 401);
   });
 
-  test('rejects a forged session cookie', () => {
+  test('rejects a forged session cookie', async () => {
     const res = fakeRes();
     let nextCalled = false;
-    auth.requireStaff({ headers: { cookie: `${auth.COOKIE_NAME}=forged` } }, res, () => { nextCalled = true; });
+    await auth.requireStaff({ headers: { cookie: `${auth.COOKIE_NAME}=forged` } }, res, () => { nextCalled = true; });
     assert.equal(nextCalled, false);
     assert.equal(res.statusCode, 401);
   });
 
-  test('allows a request carrying a real session cookie', () => {
-    const token = auth.createSession();
+  test('allows a request carrying a real session cookie', async () => {
+    const token = await auth.createSession();
     const res = fakeRes();
     let nextCalled = false;
-    auth.requireStaff({ headers: { cookie: `other=x; ${auth.COOKIE_NAME}=${token}` } }, res, () => { nextCalled = true; });
+    await auth.requireStaff({ headers: { cookie: `other=x; ${auth.COOKIE_NAME}=${token}` } }, res, () => { nextCalled = true; });
     assert.equal(nextCalled, true, 'valid session must reach the handler');
     assert.equal(res.statusCode, null);
   });
