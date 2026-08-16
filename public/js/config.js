@@ -6,7 +6,8 @@
 // ============================================================
 
 // Digits only, country code first, no + or spaces (e.g. "14735369931").
-export const WHATSAPP_NUMBER = '14735369931';
+export const WHATSAPP_NUMBER = '13473981562';
+//UPDATE NUMBER FORM
 
 // Paste the URL you get from deploying the Google Apps Script as a Web App
 // (Extensions > Apps Script > Deploy > New deployment > Web app, "Anyone"
