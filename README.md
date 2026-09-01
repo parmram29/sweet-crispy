@@ -7,6 +7,8 @@ staff login, no card payment gateway: customers browse the menu, add to a
 cart, and checkout opens a prefilled WhatsApp message to place the order.
 Payment is cash on pickup, confirmed in person.
 
+LINK- sweet-crispy.vercel.app
+
 ## How ordering actually works
 
 There's no backend call in the checkout flow at all:
