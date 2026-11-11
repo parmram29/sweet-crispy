@@ -1,3 +1,11 @@
+## Copyright
+
+Copyright (c) 2026 Parmanand Ramcharran. All rights reserved.
+
+This code is provided for viewing purposes only. No part of this project may be copied, modified, distributed, or used without written permission from the author.
+
+
+
 # Sweet & Crispy
 
 A family-run pizzeria & kitchen site for Grenada. Vanilla ES-module frontend
